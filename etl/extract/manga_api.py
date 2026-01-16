@@ -1,6 +1,7 @@
 from __future__ import annotations
 import datetime as dt
-from typing import List, Dict
+import logging
+from typing import List, Dict, Iterator
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
@@ -8,6 +9,8 @@ from urllib3.util import Retry
 from etl.config import settings
 from etl.clients.minio_client import upload_bytes
 from etl.utils.jsonl import dumps_bytes
+
+logger = logging.getLogger(__name__)
 
 def _make_session() -> requests.Session:
     s = requests.Session()
@@ -50,14 +53,12 @@ def _request_page(limit: int, offset: int) -> List[Dict]:
     """
     session = _make_session()
     last_err: Exception | None = None
-    # 1) Primary (Manga Hook)
     if settings.manga_api_base:
         try:
             return _request_page_from(settings.manga_api_base, limit, offset, session, tolerate_400=False)
         except Exception as e:
-            print(f"[extract] primary API failed: {e!r}, will try fallback if configured")
+            logger.warning("Primary API failed: %r, will try fallback if configured", e)
             last_err = e
-    # 2) Fallback (MangaDex by default) — tolerate 400 when beyond total
     if settings.manga_api_fallback:
         try:
             return _request_page_from(settings.manga_api_fallback, limit, offset, session, tolerate_400=True)
@@ -66,20 +67,20 @@ def _request_page(limit: int, offset: int) -> List[Dict]:
             if status == 400:
                 # Treat 400 as "no more data" for public API pagination edge
                 return []
-            print(f"[extract] fallback API failed: {e!r}")
+            logger.error("Fallback API failed: %r", e)
             last_err = e
         except Exception as e:
-            print(f"[extract] fallback API failed: {e!r}")
+            logger.error("Fallback API failed: %r", e)
             last_err = e
-    # If we reached here, raise whatever we have
     if last_err:
         raise last_err
     raise RuntimeError("No API endpoint configured. Set MANGA_API_BASE or MANGA_API_FALLBACK.")
 
-def fetch_and_store_jsonl(ds: str, page_size: int = 100) -> None:
+def fetch_and_store_jsonl(ds: str, page_size: int = 100, batch_size: int = 1000) -> None:
     """
     Extracts manga list from API and stores as JSONL into MinIO:
       raw/manga/load_date=YYYY-MM-DD/manga_YYYYMMDD_HHMMSS.jsonl
+    Processes data in batches to avoid loading all into memory.
     """
     load_date = dt.datetime.strptime(ds, "%Y-%m-%d").date()
     prefix = f"raw/manga/load_date={load_date.isoformat()}/"
@@ -87,15 +88,27 @@ def fetch_and_store_jsonl(ds: str, page_size: int = 100) -> None:
     key = f"{prefix}manga_{timestamp}.jsonl"
 
     offset = 0
-    all_items: List[Dict] = []
+    batch: List[Dict] = []
+    file_index = 0
+
     while True:
         items = _request_page(page_size, offset)
         if not items:
             break
-        all_items.extend(items)
-        if len(items) < page_size:
-            break
+        batch.extend(items)
         offset += page_size
 
-    payload = dumps_bytes(all_items)
-    upload_bytes(key, payload, "application/jsonl")
+        # If batch is full or last page, upload
+        if len(batch) >= batch_size or len(items) < page_size:
+            if batch:
+                payload = dumps_bytes(batch)
+                if file_index == 0:
+                    upload_key = key
+                else:
+                    upload_key = key.replace('.jsonl', f'_{file_index}.jsonl')
+                upload_bytes(upload_key, payload, "application/jsonl")
+                batch = []
+                file_index += 1
+
+        if len(items) < page_size:
+            break

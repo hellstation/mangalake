@@ -1,11 +1,27 @@
 from __future__ import annotations
 import datetime as dt
 import json
-from typing import Any, Dict, List, Optional
+import logging
+from typing import Any, Dict, List, Optional, Iterator, Callable
 import pandas as pd
 
 from etl.clients.minio_client import list_keys, read_bytes
 from etl.config import settings
+
+logger = logging.getLogger(__name__)
+
+def _get_nested_value(item: Dict[str, Any], paths: List[List[str]]) -> Any:
+    """Get value from nested dict using list of paths."""
+    for path in paths:
+        ref = item
+        for key in path:
+            if isinstance(ref, dict) and key in ref:
+                ref = ref[key]
+            else:
+                break
+        else:
+            return ref
+    return None
 
 def _extract_title(item: Dict[str, Any]) -> Optional[str]:
     t = item.get("title")
@@ -15,7 +31,6 @@ def _extract_title(item: Dict[str, Any]) -> Optional[str]:
         for lang in ("en", "ru", "ja"):
             if t.get(lang):
                 return t[lang]
-        # first available
         for v in t.values():
             if isinstance(v, str):
                 return v
@@ -83,18 +98,8 @@ def _extract_tags(item: Dict[str, Any]) -> Optional[str]:
     return ", ".join(tags) if tags else None
 
 def _extract_updated_at(item: Dict[str, Any]) -> Optional[str]:
-    for path in (("updatedAt",), ("attributes","updatedAt")):
-        ref = item
-        ok = True
-        for k in path:
-            if isinstance(ref, dict) and k in ref:
-                ref = ref[k]
-            else:
-                ok = False
-                break
-        if ok and isinstance(ref, str):
-            return ref
-    return None
+    val = _get_nested_value(item, [["updatedAt"], ["attributes", "updatedAt"]])
+    return val if isinstance(val, str) else None
 
 def _extract_id(item: Dict[str, Any]) -> str:
     for k in ("id", "mangaId", "manga_id", "uuid"):
@@ -103,9 +108,8 @@ def _extract_id(item: Dict[str, Any]) -> str:
             return str(v)
     return json.dumps(item, sort_keys=True)[:64]  # fallback
 
-def _load_raw_records(prefix: str) -> List[Dict[str, Any]]:
+def _load_raw_records(prefix: str) -> Iterator[Dict[str, Any]]:
     keys = list_keys(prefix)
-    records: List[Dict[str, Any]] = []
     for k in keys:
         if not k.endswith(".jsonl"):
             continue
@@ -115,26 +119,27 @@ def _load_raw_records(prefix: str) -> List[Dict[str, Any]]:
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
-            except Exception:
+                yield json.loads(line)
+            except Exception as e:
+                logger.warning("Failed to parse JSON line: %r", e)
                 pass
-    return records
 
-def transform_latest_to_df(ds: str) -> pd.DataFrame:
+def transform_latest_to_df(ds: str, chunk_size: int = 10000) -> pd.DataFrame:
     """Reads latest raw for a given ds from MinIO and returns a normalized DataFrame."""
     load_date = dt.datetime.strptime(ds, "%Y-%m-%d").date()
     prefix = f"raw/manga/load_date={load_date.isoformat()}/"
-    items = _load_raw_records(prefix)
     rows = []
-    for it in items:
+    for item in _load_raw_records(prefix):
         rows.append({
-            "MANGA_ID": _extract_id(it),
-            "TITLE": _extract_title(it),
-            "STATUS": _extract_status(it),
-            "LAST_CHAPTER": _extract_last_chapter(it),
-            "YEAR": _extract_year(it),
-            "TAGS": _extract_tags(it),
-            "UPDATED_AT": _extract_updated_at(it),
+            "MANGA_ID": _extract_id(item),
+            "TITLE": _extract_title(item),
+            "STATUS": _extract_status(item),
+            "LAST_CHAPTER": _extract_last_chapter(item),
+            "YEAR": _extract_year(item),
+            "TAGS": _extract_tags(item),
+            "UPDATED_AT": _extract_updated_at(item),
         })
+        if len(rows) >= chunk_size:
+            pass
     df = pd.DataFrame(rows, columns=["MANGA_ID","TITLE","STATUS","LAST_CHAPTER","YEAR","TAGS","UPDATED_AT"])
     return df

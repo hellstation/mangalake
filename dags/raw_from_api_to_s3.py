@@ -1,8 +1,11 @@
 from __future__ import annotations
+import logging
 
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+
+logger = logging.getLogger(__name__)
 
 """
 DAG: raw_from_api_to_s3
@@ -12,7 +15,10 @@ DAG: raw_from_api_to_s3
 
 def extract_raw(**context):
     from etl.extract.manga_api import fetch_and_store_jsonl
-    fetch_and_store_jsonl(context["ds"], page_size=100)
+    ds = context["ds"]
+    logger.info("Starting extraction for date: %s", ds)
+    fetch_and_store_jsonl(ds, page_size=100)
+    logger.info("Completed extraction for date: %s", ds)
 
 default_args = {
     "owner": "airflow",
