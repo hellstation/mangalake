@@ -1,88 +1,96 @@
-# 📊 MangaLake
+# MangaLake
 
-**End-to-end data pipeline for manga metadata processing and analytics**
+End-to-end ETL pipeline for manga metadata processing and analytics.
 
-Manga Lakehouse is a pet-project to show the Data Lakehouse concept with manga metadata.
-It uses Airflow for orchestration, MinIO for storage, Snowflake for analytics, and Superset for visualization.
-The project runs in Docker containers, can be set up with a .env file, and lets you see the full way “API → Lake → Warehouse → BI” in just a few minutes.
+## Overview
 
-## 🏗️ Architecture
+MangaLake is a data lakehouse implementation that demonstrates modern data engineering practices. It extracts manga metadata from APIs, stores raw data in object storage, transforms it, and loads it into a data warehouse for analytics and visualization.
 
-📊 Data Flow Pipeline
+The pipeline follows the "API → Lake → Warehouse → BI" architecture pattern, showcasing scalable ETL processes with proper error handling, retry logic, and data quality controls.
 
-```mermaid
-flowchart LR
-  API[(Manga API)] -->|JSON| Airflow
-  Airflow -->|JSONL| MinIO[(MinIO / S3)]
-  Airflow -->|SQL| Snowflake[(Snowflake)]
-  Snowflake -->|SQL| Superset[(Superset)]
+## Architecture
+
+```
+API → Airflow → MinIO → Snowflake → Superset
+     ↓         ↓         ↓         ↓
+  Extract  Transform  Store    Analyze
 ```
 
-### 🛠️ Technology Stack
+### Data Flow
+1. **Extract**: Fetch manga data from APIs with fallback mechanisms
+2. **Load Raw**: Store JSONL files in MinIO (S3-compatible storage)
+3. **Transform**: Clean and normalize data using Pandas
+4. **Load ODS**: Upsert data into Snowflake data warehouse
+5. **Build Marts**: Create dimensional models for analytics
+6. **Visualize**: Explore data through Superset dashboards
 
-- 🔄 Orchestration: Apache Airflow (LocalExecutor + Triggerer)
-- 💾 Object Storage: MinIO (S3-compatible)
-- 🏢 Data Warehouse: Snowflake
-- 📈 Business Intelligence: Apache Superset
-- 🐍 Runtime: Python
-- 🐳 Containerization: Docker & Docker Compose
+## Technology Stack
 
-## ✨ Features
+- **Orchestration**: Apache Airflow
+- **Object Storage**: MinIO (S3-compatible)
+- **Data Warehouse**: Snowflake
+- **Business Intelligence**: Apache Superset
+- **Runtime**: Python 3.9+
+- **Containerization**: Docker & Docker Compose
+- **Libraries**: requests, boto3, snowflake-connector, pandas
 
-- Automatic data loading: get manga data from APIs on schedule
-- Storage: keep files in MinIO (S3-compatible object storage)
-- Data warehouse: use Snowflake for analytics
-- Dashboards: view and explore data with Superset
-- Docker setup: run everything inside containers
-- Error handling: retries and backup APIs if something fails
-- Data quality: clean ODS layer and simple dimensional models
+## Features
 
-## 🚀 Quick Start
+- Automated data extraction from multiple APIs with retry and fallback logic
+- Scalable storage in MinIO with partitioning by load date
+- Incremental loading with merge operations in Snowflake
+- Data quality checks and error handling
+- Docker-based deployment for easy setup
+- Modular ETL code with proper separation of concerns
+- Comprehensive logging and monitoring
+
+## Quick Start
 
 ### Prerequisites
 
-- Docker & Docker Compose
-- Snowflake account and credentials
+- Docker and Docker Compose
+- Snowflake account with warehouse access
 - Internet connection for API access
 
 ### Installation
 
-1. Clone the repository
+1. **Clone repository**
    ```bash
-   git clone https://github.com/qusakabi/mangalake.git
+   git clone https://github.com/hellstation/mangalake.git
    cd mangalake
    ```
 
-2. Configure environment
+2. **Configure environment**
    ```bash
    cp env.example .env
+   # Edit .env with your Snowflake credentials and other settings
    ```
-   Edit .env with your configuration (see Configuration section below). Template: [`env.example`](env.example)
 
-3. Start services
+3. **Start services**
    ```bash
-   docker compose up -d --build
+   docker-compose up -d --build
    ```
 
-4. Access the applications
-   - 🔄 Airflow: http://localhost:8081
-   - 💾 MinIO Console: http://localhost:9001 (minioadmin / minioadmin)
-   - 📈 Superset: http://localhost:88 (admin / admin)
+4. **Access applications**
+   - Airflow UI: http://localhost:8081 (admin/admin)
+   - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
+   - Superset: http://localhost:8088 (admin/admin)
 
-5. Run the pipeline
+5. **Run pipeline**
    - Open Airflow UI
-   - Unpause all DAGs
-   - Trigger raw_from_api_to_s3 — subsequent DAGs will run automatically
+   - Enable all DAGs
+   - Trigger `raw_from_api_to_s3` DAG
+   - Subsequent DAGs will run automatically
 
-## ⚙️ Configuration
+## Configuration
 
-Create a .env file from [`env.example`](env.example) and configure:
+Create `.env` file based on `env.example`:
 
-### Required Settings
+### Required Environment Variables
 
-#### Snowflake Configuration
+#### Snowflake
 ```env
-SNOWFLAKE_ACCOUNT=your_account
+SNOWFLAKE_ACCOUNT=your_account.snowflakecomputing.com
 SNOWFLAKE_USER=your_username
 SNOWFLAKE_PASSWORD=your_password
 SNOWFLAKE_WAREHOUSE=your_warehouse
@@ -90,7 +98,7 @@ SNOWFLAKE_DATABASE=your_database
 SNOWFLAKE_SCHEMA=your_schema
 ```
 
-#### MinIO Configuration
+#### MinIO
 ```env
 MINIO_ENDPOINT_URL=http://minio:9000
 MINIO_ACCESS_KEY=minioadmin
@@ -98,145 +106,175 @@ MINIO_SECRET_KEY=minioadmin
 MINIO_BUCKET_NAME=manga-data
 ```
 
-#### API Configuration (Optional)
+#### API (Optional)
 ```env
 MANGA_API_BASE=https://api.mangadex.org
-MANGA_API_FALLBACK=https://backup-api.example.com
+MANGA_API_FALLBACK=https://api.mangadex.org
 REQUEST_TIMEOUT=30
 REQUEST_RETRIES=3
 ```
 
-Defaults and parsing live in [`etl/config.py`](etl/config.py).
+Configuration details are in `etl/config.py`.
 
-## 📊 Data Pipeline
+## Data Pipeline
 
-### DAGs Overview
+### DAGs
 
-#### 1. raw_from_api_to_s3
-- Purpose: Fetches raw manga data from APIs
-- Output: JSONL files in MinIO under raw/manga/load_date={{ ds }}/
-- Schedule: Configurable (daily recommended)
-- File: [`dags/raw_from_api_to_s3.py`](dags/raw_from_api_to_s3.py)
+#### `raw_from_api_to_s3`
+Extracts manga data from APIs and stores as JSONL in MinIO.
+- **Schedule**: Daily
+- **Output**: `raw/manga/load_date=YYYY-MM-DD/manga_*.jsonl`
 
-#### 2. raw_from_s3_to_snowflake
-- Purpose: Transforms raw data and loads into ODS layer
-- Dependencies: Waits for raw data availability
-- Output: ODS_MANGA table in Snowflake
-- File: [`dags/raw_from_s3_to_snowflake.py`](dags/raw_from_s3_to_snowflake.py)
+#### `raw_from_s3_to_snowflake`
+Transforms raw data and loads into Snowflake ODS layer.
+- **Dependencies**: `raw_from_api_to_s3`
+- **Output**: `ODS_MANGA` table
 
-#### 3. fct_count_day_manga
-- Purpose: Creates daily manga counts by status
-- Output: DM_MANGA_DAILY_COUNTS table
-- File: [`dags/fct_count_day_manga.py`](dags/fct_count_day_manga.py)
+#### `fct_count_day_manga`
+Builds daily manga counts by status.
+- **Output**: `DM_MANGA_DAILY_COUNTS` table
 
-#### 4. fct_avg_day_manga
-- Purpose: Calculates average publication year by status
-- Output: DM_MANGA_AVG_YEAR table
-- File: [`dags/fct_avg_day_manga.py`](dags/fct_avg_day_manga.py)
+#### `fct_avg_day_manga`
+Calculates average publication year by status.
+- **Output**: `DM_MANGA_AVG_YEAR` table
 
 ### Data Models
 
-#### ODS Layer
-ODS_MANGA
+#### ODS_MANGA (Operational Data Store)
 ```sql
-- MANGA_ID (String): Unique identifier
-- TITLE (String): Manga title
-- STATUS (String): Publication status
-- LAST_CHAPTER (Number): Latest chapter number
-- YEAR (Number): Publication year
-- TAGS (Array): Genre tags
-- UPDATED_AT (Timestamp): Last update time
-- LOAD_DATE (Date): ETL load date
+MANGA_ID STRING PRIMARY KEY,
+TITLE STRING,
+STATUS STRING,
+LAST_CHAPTER STRING,
+YEAR INTEGER,
+TAGS STRING,
+UPDATED_AT TIMESTAMP,
+LOAD_DATE DATE
 ```
 
-#### Data Mart Layer
-DM_MANGA_DAILY_COUNTS
+#### DM_MANGA_DAILY_COUNTS (Data Mart)
 ```sql
-- LOAD_DATE (Date): Processing date
-- STATUS (String): Manga status
-- COUNT_MANGA (Number): Count of manga
+LOAD_DATE DATE,
+STATUS STRING,
+COUNT_MANGA INTEGER
 ```
 
-DM_MANGA_AVG_YEAR
+#### DM_MANGA_AVG_YEAR (Data Mart)
 ```sql
-- LOAD_DATE (Date): Processing date
-- STATUS (String): Manga status
-- AVG_YEAR (Number): Average publication year
+LOAD_DATE DATE,
+STATUS STRING,
+AVG_YEAR FLOAT
 ```
 
-DM_MANGA_SUMMARY
-```sql
-- LOAD_DATE (Date): Processing date
-- YEAR (Number): Publication year
-- STATUS (String): Manga status
-- COUNT_MANGA (Number): Count of manga
-```
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 mangalake/
-├── 🔄 dags/                    # Airflow DAG definitions
+├── dags/                     # Airflow DAG definitions
 │   ├── raw_from_api_to_s3.py
 │   ├── raw_from_s3_to_snowflake.py
 │   ├── fct_count_day_manga.py
-│   └── fct_avg_day_manga.py
-├── 🔧 etl/                     # ETL logic and utilities
-│   ├── config.py               # Configuration management
-│   ├── extract/                # Data extraction modules
-│   ├── transform/              # Data transformation logic
-│   └── load/                   # Data loading utilities
-├── 🐘 postgres/               # PostgreSQL configs (Airflow metadata)
-├── 📊 superset/               # Superset configurations
-├── 🐳 docker-compose.yml      # Multi-service orchestration
-├── 📦 Dockerfile              # Container definition
-├── 📋 requirements.txt        # Python dependencies
-├── 🔧 env.example             # Environment template
-└── 📝 README.md              # This file
+│   ├── fct_avg_day_manga.py
+│   └── manga_pipeline_dag.py
+├── etl/                      # ETL logic
+│   ├── config.py            # Configuration
+│   ├── clients/             # External service clients
+│   │   ├── minio_client.py
+│   │   └── snowflake_client.py
+│   ├── extract/             # Data extraction
+│   │   └── manga_api.py
+│   ├── transform/           # Data transformation
+│   │   └── manga_transform.py
+│   ├── load/                # Data loading
+│   │   └── snowflake_load.py
+│   └── utils/               # Utilities
+│       └── jsonl.py
+├── postgres/                # PostgreSQL configs for Airflow
+├── docker-compose.yml       # Service orchestration
+├── Dockerfile              # Application container
+├── requirements.txt        # Python dependencies
+├── env.example            # Environment template
+└── README.md
 ```
 
-## 🛠️ Operations
+## Operations
 
-### Health Checks
+### Monitoring
 
 ```bash
-# Check all services status
-docker compose ps
+# Check service status
+docker-compose ps
 
-# View service logs
-docker compose logs airflow
-docker compose logs minio
+# View logs
+docker-compose logs -f airflow
+docker-compose logs -f minio
+docker-compose logs -f snowflake
 ```
 
-### Common Operations
+### Data Reprocessing
 
-#### Reprocess Data
 ```bash
-# Clear and rerun pipeline for specific date
-docker compose exec airflow-scheduler airflow dags backfill raw_from_api_to_s3 -s 2024-01-01 -e 2024-01-01
+# Backfill specific date
+docker-compose exec airflow-scheduler airflow dags backfill raw_from_api_to_s3 \
+  --start-date 2024-01-01 --end-date 2024-01-01
 ```
 
-## 🔧 Troubleshooting
+### Scaling
+
+- Increase `page_size` in DAGs for faster extraction
+- Adjust `batch_size` in `fetch_and_store_jsonl` for memory optimization
+- Scale Airflow workers for higher throughput
+
+## Troubleshooting
 
 ### Common Issues
 
-❌ No Raw Files Found  
-Problem: Downstream DAGs fail because raw files are missing  
-Solution:
-1. Check if raw_from_api_to_s3 completed successfully
-2. Verify files exist in MinIO console
-3. Check API connectivity and credentials
+**Pipeline fails at extraction**
+- Check API endpoints in `.env`
+- Verify internet connectivity
+- Review Airflow logs for specific errors
 
-❌ Snowflake Connection Failed  
-Problem: Cannot connect to Snowflake warehouse  
-Solution:
-1. Verify credentials in .env file
-2. Check network connectivity
-3. Ensure warehouse is running
+**Snowflake connection errors**
+- Validate credentials in `.env`
+- Ensure warehouse is active
+- Check network access to Snowflake
 
-❌ Superset Login Issues  
-Problem: Cannot access Superset dashboard  
-Solution:
-- Default credentials: admin / admin
-- Reset password if needed through container
+**MinIO storage issues**
+- Verify MinIO service is running
+- Check bucket permissions
+- Validate endpoint URL
+
+**Data quality problems**
+- Check source API response format
+- Review transformation logic in `manga_transform.py`
+- Validate data types in Snowflake tables
+
+### Logs
+
+All components log to stdout/stderr. Use `docker-compose logs` to troubleshoot issues.
+
+### Reset Environment
+
+```bash
+# Stop and remove all data
+docker-compose down -v
+docker-compose up -d --build
+```
+
+## Development
+
+### Code Quality
+
+- Type hints throughout codebase
+- Comprehensive error handling
+- Modular design with single responsibilities
+- Proper logging with appropriate levels
+
+### Testing
+
+Run tests (when implemented):
+```bash
+python -m pytest
+```
+
 
