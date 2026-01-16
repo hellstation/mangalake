@@ -1,6 +1,5 @@
-# MangaLake
-
-End-to-end ETL pipeline for manga metadata processing and analytics.
+# MangaLake End-to-end ETL pipeline for manga metadata processing and analytics.
+![xdd](image.png)
 
 ## Overview
 
