@@ -148,7 +148,7 @@ services:
     env_file:
       - .env
     environment:
-      SUPERSET_SECRET_KEY: "gJCFB40L6X0AELIMKS6Hrd1T8mDhcavwBuCcFpEmwNlc09QXAp7Qp3+6"
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-local-dev-superset-secret-key}
       SUPERSET_ADMIN_USERNAME: admin
       SUPERSET_ADMIN_PASSWORD: admin
       SUPERSET_ADMIN_FIRSTNAME: admin
